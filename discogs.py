@@ -26,22 +26,44 @@ class Discord:
         self.oauth_token_secret = None
 
     def get_token(self):
+        # create oauth Consumer and Client objects using
         consumer = oauth.Consumer(self.consumer_key, self.consumer_secret)
         client = oauth.Client(consumer)
 
+        # pass in your consumer key and secret to the token request URL. Discogs returns
+        # an ouath_request_token as well as an oauth request_token secret.
         resp, content = client.request(self.request_token_url, 'POST', headers={'User-Agent': self.user_agent})
 
+        # we terminate if the discogs api does not return an HTTP 200 OK. Something is
+        # wrong.
         if resp['status'] != '200':
             sys.exit('Invalid response {0}.'.format(resp['status']))
 
         request_token = dict(parse_qsl(content.decode('utf-8')))
 
+        print(' == Request Token == ')
+        print(f'    * oauth_token        = {request_token["oauth_token"]}')
+        print(f'    * oauth_token_secret = {request_token["oauth_token_secret"]}')
+        print()
+
+        # Authorize our newly received request_token against the discogs oauth endpoint.
+        # Prompt your user to "accept" the terms of your application. The application
+        # will act on behalf of their discogs.com account.
+        # If the user accepts, discogs displays a key to the user that is used for
+        # verification. The key is required in the 2nd phase of authentication.
         print(f'Please browse to the following URL {self.authorize_url}?oauth_token={request_token["oauth_token"]}')
 
-        while oauth_verifier is None:
+        # Waiting for user input
+        accepted = 'n'
+        while accepted.lower() == 'n':
             print()
-            oauth_verifier = input('Verification code : ')
+            accepted = input(
+                f'Have you authorized me at {self.authorize_url}?oauth_token={request_token["oauth_token"]} [y/n] :')
 
+        # request the verification token from the user.
+        oauth_verifier = input('Verification code : ')
+
+        # Generate objects that pass the verification key with the oauth token and oauth
         # secret to the discogs access_token_url
         token = oauth.Token(request_token['oauth_token'], request_token['oauth_token_secret'])
         token.set_verifier(oauth_verifier)
@@ -49,20 +71,40 @@ class Discord:
 
         resp, content = client.request(self.access_token_url, 'POST', headers={'User-Agent': self.user_agent})
 
+        # if verification is successful, the discogs oauth API will return an access token
+        # and access token secret. This is the final authentication phase. You should persist
+        # the oauth_token and the oauth_token_secret to disk, database or some
+        # other local store. All further requests to the discogs.com API that require authentication
+        # and must be made with these access_tokens.
         access_token = dict(parse_qsl(content.decode('utf-8')))
+
+        print(' == Access Token ==')
+        print(f'    * oauth_token        = {access_token["oauth_token"]}')
+        print(f'    * oauth_token_secret = {access_token["oauth_token_secret"]}')
+        print(' Authentication complete. Future requests must be signed with the above tokens.')
+        print()
+
+        # We're now able to fetch an image using the application consumer key and secret,
+        # along with the verified oauth token and oauth token for this user.
+        token = oauth.Token(key=access_token['oauth_token'],
+                            secret=access_token['oauth_token_secret'])
+        client = oauth.Client(consumer, token)
+
+
         self.oauth_token = request_token['oauth_token']
         self.oauth_token_secret = request_token['oauth_token_secret']
-        return True
+        return request_token['oauth_token'], request_token['oauth_token_secret']
 
 
 # We're now able to fetch an image using the application consumer key and secret,
 # along with the verified oauth token and oauth token for this user.
-    def get_collection(self, oauth_token, oauth_token_secret):
+    def get_collection(self):
         consumer = oauth.Consumer(self.consumer_key, self.consumer_secret)
-        token = oauth.Token(key=oauth_token, secret=oauth_token_secret)
+        token = oauth.Token(key=self.oauth_token, secret=self.oauth_token_secret)
         client = oauth.Client(consumer, token)
 
         resp, content = client.request('https://api.discogs.com/oauth/identity', headers={'User-Agents': self.user_agent})
+        print(content)
         user = json.loads(content.decode('utf-8'))
 
         # With an active auth token, we're able to reuse the client object and request
@@ -78,9 +120,9 @@ class Discord:
         return collection, username
 
 
-    def select_collection_and_get_albums(self, collection, oauth_token, oauth_token_secret, username):
+    def select_collection_and_get_albums(self, collection, username):
         consumer = oauth.Consumer(self.consumer_key, self.consumer_secret)
-        token = oauth.Token(key=oauth_token, secret=oauth_token_secret)
+        token = oauth.Token(key=self.oauth_token, secret=self.oauth_token_secret)
         client = oauth.Client(consumer, token)
         users_collection = []
         i = 0
