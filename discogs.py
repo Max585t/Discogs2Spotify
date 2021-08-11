@@ -86,13 +86,9 @@ class Discord:
 
         # We're now able to fetch an image using the application consumer key and secret,
         # along with the verified oauth token and oauth token for this user.
-        token = oauth.Token(key=access_token['oauth_token'],
-                            secret=access_token['oauth_token_secret'])
-        client = oauth.Client(consumer, token)
 
-
-        self.oauth_token = request_token['oauth_token']
-        self.oauth_token_secret = request_token['oauth_token_secret']
+        self.oauth_token = access_token['oauth_token']
+        self.oauth_token_secret = access_token['oauth_token_secret']
         return request_token['oauth_token'], request_token['oauth_token_secret']
 
 
@@ -106,7 +102,7 @@ class Discord:
         resp, content = client.request('https://api.discogs.com/oauth/identity', headers={'User-Agents': self.user_agent})
         print(content)
         user = json.loads(content.decode('utf-8'))
-
+        print(user)
         # With an active auth token, we're able to reuse the client object and request
         # additional discogs authenticated endpoints, such as database search.
         username = user['username']
@@ -129,12 +125,34 @@ class Discord:
         for x in collection['folders']:
             print(i, x['name'], "count: " + str(x['count']))
             users_collection.append(x['id'])
+            i+=1
 
         selection = input("please enter the index of which folder you would like to select: ")
-        folder_id = users_collection[selection]
+        folder_id = users_collection[int(selection)]
 
         resp, content = client.request(f'https://api.discogs.com/users/{username}/collection/folders/{folder_id}/releases',
                                        headers={'User-Agents': self.user_agent})
 
         if resp['status'] != '200':
             sys.exit('Invalid API response {0}.'.format(resp['status']))
+
+        content = json.loads(content)
+
+        releases = content.get("releases")
+
+        num_pages = content.get("pagination").get("pages")
+        if num_pages > 1:
+            i = 1
+            while i < num_pages:
+                next_url = content.get("pagination").get("urls").get("next")
+                print(next_url)
+                resp, content = client.request(next_url,
+                    headers={'User-Agents': self.user_agent})
+                if resp['status'] == '200':
+                    content = json.loads(content)
+                    releases.append(content.get("releases"))
+                else:
+                    break
+                i+=1
+
+        print(releases)
